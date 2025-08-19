@@ -1,4 +1,3 @@
-import React from "react";
 import { Link } from "react-router-dom";
 import { useSignOut, useUserDisplayName } from "@nhost/react";
 import { Menu } from "lucide-react";

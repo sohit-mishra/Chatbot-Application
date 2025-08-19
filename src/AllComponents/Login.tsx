@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import nhost from "../lib/nhostClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

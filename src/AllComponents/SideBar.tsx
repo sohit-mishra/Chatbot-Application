@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { X, Trash2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { gql, useQuery, useMutation } from "@apollo/client";
