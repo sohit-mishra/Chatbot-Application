@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
 import Navbar from "@/AllComponents/Navbar";
 import SideBar from "@/AllComponents/SideBar";
 import Message from "@/AllComponents/Message";
@@ -27,11 +26,7 @@ export default function Dashboard() {
         </aside>
 
         <main className="flex-1 p-4 overflow-y-auto md:ml-0">
-          <Card className="h-full shadow-md">
-            <CardContent className="h-full p-4">
-              <Message chatId={selectedChatId} />
-            </CardContent>
-          </Card>
+          <Message chatId={selectedChatId} />
         </main>
       </div>
     </div>

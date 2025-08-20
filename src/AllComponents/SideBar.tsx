@@ -6,11 +6,12 @@ import { useUserId } from "@nhost/react";
 import { Input } from "@/components/ui/input";
 import { formatDistanceToNow } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
+import { DELETE_ALL_MESSAGES_BY_CHATID } from "@/graphql/mutations";
 
 interface SideBarProps {
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
-  onSelectChat: (chat: { chat_id: string; title: string }) => void;
+  onSelectChat: (chat: { chat_id: string | null; title: string }) => void;
   selectedChatId: string | null;
 }
 
@@ -76,6 +77,7 @@ export default function SideBar({
   const [input, setInput] = useState("");
   const userId = useUserId();
   const [users, setUsers] = useState<BotUser[]>([]);
+  const [deleteAllMessages] = useMutation(DELETE_ALL_MESSAGES_BY_CHATID);
 
   const { data, loading, error } = useQuery<GetChatsData>(GET_BOT_USERS, {
     variables: { user_id: userId! },
@@ -143,7 +145,19 @@ export default function SideBar({
 
   const handleDeleteBotUser = async (id: string) => {
     try {
+      await deleteAllMessages({ variables: { chatId: id } });
       await deleteBotUser({ variables: { id } });
+      if (selectedChatId === id) {
+        const remainingChats = users.filter((chat) => chat.id !== id);
+        if (remainingChats.length > 0) {
+          onSelectChat({
+            chat_id: remainingChats[0].id,
+            title: remainingChats[0].title,
+          });
+        } else {
+          onSelectChat({ chat_id: null, title: "" });
+        }
+      }
     } catch (err) {
       console.error("Error deleting chat:", err);
     }
@@ -172,8 +186,8 @@ export default function SideBar({
 
       <motion.div
         className="fixed top-0 left-0 h-full w-64 bg-white shadow-lg z-50 flex flex-col"
-        initial={{ x: -300 }} 
-        animate={{ x: 0 }} 
+        initial={{ x: -300 }}
+        animate={{ x: 0 }}
         transition={{ type: "spring", stiffness: 120, damping: 20 }}
       >
         <div className="flex justify-between items-center p-4 border-b">

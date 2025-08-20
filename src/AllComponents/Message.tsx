@@ -1,78 +1,42 @@
-import { gql, useQuery, useMutation } from "@apollo/client";
 import { useState, useEffect, useRef } from "react";
 import { useUserId } from "@nhost/react";
 import { formatDistanceToNow } from "date-fns";
-import { FaUser, FaRobot } from "react-icons/fa";
+import { useQuery, useMutation } from "@apollo/client";
+import { GET_MESSAGES, SEND_USER_MESSAGE } from "@/graphql/mutations";
+import { motion, AnimatePresence } from "framer-motion";
 
-const GET_MESSAGES = gql`
-  query GetMessages($chatId: uuid!) {
-    messages(
-      where: { chat_id: { _eq: $chatId } }
-      order_by: { created_at: asc }
-    ) {
-      id
-      sender
-      user_id
-      chat_id
-      content
-      created_at
-    }
-  }
-`;
-
-const SEND_USER_MESSAGE = gql`
-  mutation SendUserMessage(
-    $userId: uuid!
-    $send: String!
-    $chatId: uuid!
-    $content: String!
-  ) {
-    insert_messages(
-      objects: {
-        user_id: $userId
-        sender: $send
-        chat_id: $chatId
-        content: $content
-      }
-    ) {
-      returning {
-        id
-        user_id
-        sender
-        chat_id
-        content
-        created_at
-      }
-    }
-  }
-`;
+interface MessageType {
+  id: string;
+  sender: "user" | "bot";
+  content: string;
+  created_at: string;
+}
 
 interface MessageProps {
   chatId: string | null;
 }
 
-interface MessageType {
-  id: string;
-  sender: string;
-  content: string;
-  created_at: string;
-}
-
 export default function Message({ chatId }: MessageProps) {
   const userId = useUserId();
-  const { data, refetch } = useQuery(GET_MESSAGES, {
+  const [messages, setMessages] = useState<MessageType[]>([]);
+  const [content, setContent] = useState("");
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  const { data, loading: queryLoading } = useQuery(GET_MESSAGES, {
     variables: { chatId },
     skip: !chatId,
-    fetchPolicy: "network-only",
   });
 
-  const [content, setContent] = useState("");
-  const [sendUserMessage] = useMutation(SEND_USER_MESSAGE);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const [sendMessage] = useMutation(SEND_USER_MESSAGE);
+
+  useEffect(() => {
+    if (data?.messages) setMessages(data.messages);
+  }, [data]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [data]);
+  }, [messages]);
 
   const handleSend = async () => {
     if (!content.trim() || !chatId || !userId) return;
@@ -80,50 +44,73 @@ export default function Message({ chatId }: MessageProps) {
     const userMessage = content.trim();
     setContent("");
 
+    const userMsgObj: MessageType = {
+      id: Date.now().toString(),
+      sender: "user",
+      content: userMessage,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMsgObj]);
+
     try {
-      await sendUserMessage({
-        variables: {
-          userId,
-          send: "user",
-          chatId,
-          content: userMessage,
-        },
+      setLoading(true);
+
+      await sendMessage({
+        variables: { userId, send: "user", chatId, content: userMessage },
       });
 
-      await refetch();
+      const typingMsg: MessageType = {
+        id: "bot_typing",
+        sender: "bot",
+        content: "Bot is typing...",
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, typingMsg]);
 
+      const webhookUrl = import.meta.env.VITE_WEBHOOK_URL;
+      const username = import.meta.env.VITE_USERNAME;
+      const password = import.meta.env.VITE_PASSWORD;
+      const basicAuth = btoa(`${username}:${password}`);
 
-      const response = await fetch("https://openrouter.ai/v1/chat/completions", {
+      const res = await fetch(webhookUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_OPENROUTER_API_KEY}`,
+          Authorization: `Basic ${basicAuth}`,
         },
-        body: JSON.stringify({
-          model: import.meta.env.VITE_AI_MODEL,
-          messages: [{ role: "user", content: userMessage }],
-          max_tokens: 300,
-        }),
+        body: JSON.stringify({ chat_id: chatId, text: userMessage }),
       });
 
-      const data = await response.json();
-      const aiMessage = data?.choices?.[0]?.message?.content || "Sorry, I couldn't respond.";
+      const data = await res.json();
+      const aiMessage = data?.text || "Sorry, I couldn't respond.";
 
-      console.log(aiMessage)
-
-
-      await sendUserMessage({
-        variables: {
-          userId,
-          send: "bot",
-          chatId,
-          content: aiMessage,
-        },
+      await sendMessage({
+        variables: { userId, send: "bot", chatId, content: aiMessage },
       });
 
-      await refetch();
+      setMessages((prev) => prev.filter((m) => m.id !== "bot_typing"));
+
+      const botMsgObj: MessageType = {
+        id: Date.now().toString() + "_bot",
+        sender: "bot",
+        content: aiMessage,
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, botMsgObj]);
     } catch (err) {
       console.error("Error sending message:", err);
+
+      setMessages((prev) => prev.filter((m) => m.id !== "bot_typing"));
+
+      const errorMsg: MessageType = {
+        id: Date.now().toString() + "_err",
+        sender: "bot",
+        content: "Error: Could not reach AI or save message.",
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -135,47 +122,64 @@ export default function Message({ chatId }: MessageProps) {
     );
   }
 
+  if (queryLoading) {
+    return (
+      <div className="flex items-center justify-center h-full text-gray-500">
+        Loading messages...
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col flex-1 h-full">
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
-        {data?.messages?.map((m: MessageType) => (
-          <div
-            key={m.id}
-            className={`flex items-end p-2 rounded max-w-xs break-words ${
-              m.sender === "bot"
-                ? "bg-gray-600 text-white mr-auto"
-                : "bg-gray-200 text-black ml-auto"
-            }`}
-          >
-            <div className="mr-2">
-              {m.sender === "bot" ? <FaRobot /> : <FaUser />}
-            </div>
-            <div>
-              <div className="text-sm">{m.content}</div>
-              <div className="text-xs text-gray-300 mt-1">
-                {formatDistanceToNow(new Date(m.created_at), {
-                  addSuffix: true,
-                })}
+    <div className="flex flex-col h-full bg-gray-100">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200">
+        <AnimatePresence initial={false}>
+          {messages.map((m) => (
+            <motion.div
+              key={m.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.25 }}
+              className={`flex items-end ${
+                m.sender === "bot" ? "justify-start" : "justify-end"
+              }`}
+            >
+              <div
+                className={`p-3 rounded-lg break-words max-w-[75%] md:max-w-[50%] ${
+                  m.sender === "bot"
+                    ? "bg-gray-300 text-black rounded-bl-none"
+                    : "bg-blue-500 text-white rounded-br-none"
+                }`}
+              >
+                {m.content}
+                <div className="text-xs text-gray-500 mt-1 text-right">
+                  {formatDistanceToNow(new Date(m.created_at), { addSuffix: true })}
+                </div>
               </div>
-            </div>
-          </div>
-        ))}
+            </motion.div>
+          ))}
+        </AnimatePresence>
         <div ref={bottomRef}></div>
       </div>
 
-      <div className="p-4 border-t flex gap-2">
+
+      <div className="p-3 border-t bg-white flex gap-2 sticky bottom-0">
         <input
+          type="text"
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          className="flex-1 border rounded p-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
-          placeholder="Type a message..."
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
+          placeholder="Type a message..."
+          disabled={loading}
+          className="flex-1 border rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
         />
         <button
           onClick={handleSend}
-          className="bg-blue-500 text-white px-4 rounded hover:bg-blue-600"
+          disabled={loading}
+          className="bg-blue-500 text-white px-4 py-2 rounded-full hover:bg-blue-600"
         >
-          Send
+          {loading ? "Sending..." : "Send"}
         </button>
       </div>
     </div>

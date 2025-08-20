@@ -9,7 +9,6 @@ const HASURA_WS_URL = `wss://${import.meta.env.VITE_NHOST_SUBDOMAIN}.hasura.${im
 
 
 const token = import.meta.env.VITE_ADMIN_SECRET;
-console.log(token)
 
 
 const httpLink = new HttpLink({
